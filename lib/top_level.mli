@@ -1,4 +1,4 @@
-open Folderol
+open Solver
 
 val print : goaltable -> goaltable
 

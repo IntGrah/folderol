@@ -1,17 +1,20 @@
+(* Just for fun, a recursive descent parser based on monadic parser combinators *)
+
 module Combinators = struct
-  (* Haskell: newtype Parser a = StateT [Token] Maybe a *)
   type 'a t = Lexer.token list -> ('a * Lexer.token list) option
+  (** Haskell: [newtype Parser a = StateT [Token] Maybe a] *)
 
   let return a = fun toks -> Some (a, toks)
 
   let ( let* ) (ma : 'a t) (f : 'a -> 'b t) : 'b t =
    fun toks -> Option.bind (ma toks) (fun (a, toks) -> f a toks)
 
+  (** From Alternative / MonadPlus *)
   let ( <|> ) (ma : 'a t) (ma' : 'a t) : 'a t =
    fun toks -> match ma toks with Some a -> Some a | None -> ma' toks
 
   let fail : 'a t = fun _ -> None
-  let one_of (parsers : 'a t list) : 'a t = List.fold_right ( <|> ) parsers fail
+  let one_of (parsers : 'a t list) : 'a t = List.fold_left ( <|> ) fail parsers
 end
 
 open Ast
@@ -53,7 +56,7 @@ let rec parse_term : term t =
     ]
     toks
 
-(*Parsing of formulae;  prec is the precedence of the operator to the left;
+(** Parsing of formulae; prec is the precedence of the operator to the left;
     parsing stops at an operator with lower precedence*)
 let rec parse_form toks =
   let makeQuant q b a = Quant (q, b, abstract (Fun (b, [])) a) in

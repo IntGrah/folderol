@@ -1,19 +1,13 @@
 (*  Title:      folderol.ml
     Author:     Lawrence C Paulson, Cambridge University Computer Laboratory
-    Modified:   Jeremy Chen
-    Updated 	2025-03-21
+    Updated 	  2025-03-21
 
 PROVER FOR CLASSICAL FIRST-ORDER LOGIC
 
 This should run under any up-to-date version of OCaml.
 
-use "folderol.ml";
-use "testsuite.ml";
-
 Or use a text editor to cut-and-paste examples from testsuite.ml to
 *)
-
-(*BASIC FUNCTIONS*)
 
 open Ast
 
@@ -169,13 +163,15 @@ let rec insert_goals (x : goaltable) (afs : formula list) (tab : goaltable) =
             (inst_goals tab env)
       | [] -> insert_goals gfs afs (gf :: tab))
 
-let string_of_symbol = function
-  | Pred (a, _) -> a
-  | Neg _ -> "~"
-  | Binop (_, a, _) -> string_of_connective a
-  | Quant (q, _, _) -> string_of_quantifier q
+let pp_symbol ppf = function
+  | Pred (a, _) -> Format.pp_print_string ppf a
+  | Neg _ -> Format.pp_print_string ppf "~"
+  | Binop (_, a, _) -> pp_connective ppf a
+  | Quant (q, _, _) -> pp_quantifier ppf q
 
-let string_of_side = function Right -> ":right" | Left -> ":left"
+let pp_side ppf = function
+  | Right -> Format.pp_print_string ppf ":right"
+  | Left -> Format.pp_print_string ppf ":left"
 
 (** Generation of new variable names *)
 let gensym, init_gensym =
@@ -255,11 +251,10 @@ let reduce_goal (entry : entry) (gf : goal) : goal list =
 (** Print the rule used, with each formula found by unification, indenting by
     number of goals left. *)
 let print_step (_, (si, cf)) ngoals afs =
-  print_string (String.make ngoals ' ' ^ string_of_symbol cf ^ string_of_side si);
-  print_endline
-    (List.rev_map string_of_formula afs
-    |> List.map (fun x -> "   " ^ x)
-    |> String.concat "")
+  Format.printf "%*s%a%a%a@." ngoals "" pp_symbol cf pp_side si
+    (Format.pp_print_list ~pp_sep:Format.pp_print_nothing (fun ppf ->
+         Format.fprintf ppf "   %a" pp_formula))
+    (List.rev afs)
 
 (** A single inference in the goaltable *)
 let proof_step : goaltable -> goaltable = function
@@ -278,7 +273,7 @@ let rec proof_steps n = function
   | tab -> (
       try proof_steps (n - 1) (proof_step tab)
       with Reduce ->
-        print_string "\n**No proof rules applicable**\n";
+        Format.printf "@.**No proof rules applicable**@.";
         tab)
 
 (** Make a goal from lists of formulae: As |- Bs *)
@@ -295,33 +290,35 @@ let read_tab afstrs bfstrs : goaltable =
   let _, tab = insert_goals [ gf ] [] [] in
   tab
 
-let string_of_sequent = function
-  | [] -> "empty"
-  | afs -> String.concat ", " (List.map string_of_formula afs)
+let pp_sequent ppf = function
+  | [] -> Format.pp_print_string ppf "empty"
+  | afs ->
+      Format.pp_print_list
+        ~pp_sep:(fun ppf () -> Format.pp_print_string ppf ", ")
+        pp_formula ppf afs
 
-let print_goal gf =
+let pp_goal ppf gf =
   let afs, bfs = split_goal gf in
-  print_string
-    (string_of_sequent afs ^ "  |-  " ^ string_of_sequent bfs ^ "\n\n")
+  Format.fprintf ppf "%a  |-  %a@.@." pp_sequent afs pp_sequent bfs
 
-let print_param (a, ts) =
-  print_endline (a ^ "         " ^ string_of_args (List.map (fun x -> Var x) ts))
+let pp_param ppf (a, ts) =
+  Format.fprintf ppf "%s         %a@." a pp_args (List.map (fun x -> Var x) ts)
 
-let print_params = function
+let pp_params ppf = function
   | [] -> ()
   | pairs ->
-      print_endline "Param     Not allowed in";
-      List.iter print_param pairs;
-      print_newline ()
+      Format.fprintf ppf "Param     Not allowed in@.%a@."
+        (Format.pp_print_list ~pp_sep:Format.pp_print_nothing pp_param)
+        pairs
 
-let print_count = function
-  | 1 -> ()
-  | n -> print_endline (Int.to_string n ^ " goals")
+let pp_count ppf = function
+  | 1 -> Format.pp_print_nothing ppf ()
+  | n -> Format.fprintf ppf "%d goals@." n
 
-let print_tab = function
-  | [] -> print_endline "No more goals: proof finished"
+let pp_tab ppf = function
+  | [] -> Format.fprintf ppf "No more goals: proof finished@."
   | gfs ->
-      print_newline ();
-      List.iter print_goal gfs;
-      print_count (List.length gfs);
-      print_params (List.fold_left params_in_goal [] gfs)
+      Format.fprintf ppf "@.%a%a%a"
+        (Format.pp_print_list ~pp_sep:Format.pp_print_nothing pp_goal)
+        gfs pp_count (List.length gfs) pp_params
+        (List.fold_left params_in_goal [] gfs)

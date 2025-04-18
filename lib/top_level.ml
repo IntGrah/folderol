@@ -1,9 +1,9 @@
-open Folderol
+open Solver
 
 (* Top-level commands: interaction with proof state *)
 
 let print tab =
-  print_tab tab;
+  Format.printf "%a" pp_tab tab;
   tab
 
 (** Read a goal: the sequent As |- Bs *)

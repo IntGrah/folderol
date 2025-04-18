@@ -1,4 +1,4 @@
-(* Scanning a list of characters into a list of tokens *)
+(* Just for fun, a lexer written from scratch instead of using ocamllex *)
 
 type token =
   | ALL
@@ -19,8 +19,7 @@ let is_alpha_num = function
   | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' -> true
   | _ -> false
 
-(*Scanning of identifiers and keywords*)
-
+(** Scanning of identifiers *)
 let rec scan_ident front = function
   | c :: cs when is_alpha_num c -> scan_ident (c :: front) cs
   | rest -> (IDENT (front |> List.rev |> List.to_seq |> String.of_seq), rest)

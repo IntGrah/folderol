@@ -1,4 +1,4 @@
-open Top_level;;
+open Folderol.Top_level;;
 
 (* testsuite.ml
   This batch file can be read to test the theorem-prover Folderol.
