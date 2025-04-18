@@ -5,22 +5,19 @@
 (generate_opam_files true)
 
 (source
- (github username/reponame))
+ (github IntGrah/folderol))
 
-(authors "Author Name <author@example.com>")
-
-(maintainers "Maintainer Name <maintainer@example.com>")
+(authors "IntGrah <git@sl.intgrah.com>")
 
 (license LICENSE)
 
-(documentation https://url/to/documentation)
-
 (package
  (name folderol)
- (synopsis "A short synopsis")
- (description "A longer description")
+ (synopsis "First-order logic theorem prover")
+ (description
+  "First-order logic theorem prover based on Lawrence Paulson's Standard ML implementation")
  (depends ocaml)
  (tags
-  ("add topics" "to describe" your project)))
+  ("theorem" "prover" "logic")))
 
 ; See the complete stanza docs at https://dune.readthedocs.io/en/stable/reference/dune-project/index.html
