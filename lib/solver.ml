@@ -275,10 +275,7 @@ let make_goal afs bfs : goal =
 
 (** Reading of goals: Astrs |- Bstrs *)
 let read_tab afstrs bfstrs : goaltable =
-  let read str =
-    let lexbuf = Lexing.from_string str in
-    Parser.main Lexer.token lexbuf
-  in
+  let read = Frontend.Comb.read in
   let afs = List.rev_map read afstrs in
   let bfs = List.rev_map read bfstrs in
   let gf = make_goal afs bfs in

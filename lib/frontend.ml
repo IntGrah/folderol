@@ -1,17 +1,4 @@
-type token =
-  | ALL
-  | EXISTS
-  | NEG
-  | DOT
-  | COMMA
-  | LPAREN
-  | RPAREN
-  | QUESTION
-  | IMPLIES
-  | IFF
-  | AND
-  | OR
-  | IDENT of string
+open Parser
 
 (** A really bad lexer written from scratch instead of using ocamllex *)
 module Lex : sig
@@ -24,12 +11,12 @@ end = struct
   (** Scanning of identifiers or EXISTS / ALL *)
   let rec scan_ident front = function
     | c :: cs when is_alpha_num c -> scan_ident (c :: front) cs
-    | rest -> (front |> List.rev |> List.to_seq |> String.of_seq, rest)
+    | rest -> (List.rev front |> List.to_seq |> String.of_seq, rest)
 
   (** Scanning, skipping blanks, etc. *)
   let rec scan front_toks = function
     (* End of char list *)
-    | [] -> List.rev front_toks
+    | [] -> List.rev (EOF :: front_toks)
     | '-' :: '-' :: '>' :: cs -> scan (IMPLIES :: front_toks) cs
     | '<' :: '-' :: '>' :: cs -> scan (IFF :: front_toks) cs
     | '.' :: cs -> scan (DOT :: front_toks) cs
@@ -41,25 +28,30 @@ end = struct
     | '|' :: cs -> scan (OR :: front_toks) cs
     | '?' :: cs -> scan (QUESTION :: front_toks) cs
     | (' ' | '\t' | '\n') :: cs -> scan front_toks cs
-    | c :: cs when is_alpha_num c ->
-        let str, cs = scan_ident [ c ] cs in
+    | cs ->
+        let str, cs = scan_ident [] cs in
         let tok =
-          match str with "EXISTS" -> EXISTS | "ALL" -> ALL | s -> IDENT s
+          match str with
+          | "EXISTS" -> EXISTS
+          | "ALL" -> ALL
+          | "" -> invalid_arg "Illegal character"
+          | s -> IDENT s
         in
         scan (tok :: front_toks) cs
-    | _ -> invalid_arg "Illegal character"
 end
-
-open Ast
-open Lex
 
 module type S = sig
   val read : string -> Ast.formula
 end
 
+(** Generated from ocamllex and ocamlyacc *)
+module Gen : S = struct
+  let read str = Parser.main Lexer.token (Lexing.from_string str)
+end
+
 (** A really bad recursive descent parser based on combinators *)
 module Comb : S = struct
-  module Combinators = struct
+  open struct
     type 'a t = token list -> ('a * token list) option
     (** Haskell: [newtype Parser a = StateT [Token] Maybe a] *)
 
@@ -68,7 +60,7 @@ module Comb : S = struct
     let ( let* ) (ma : 'a t) (f : 'a -> 'b t) : 'b t =
      fun toks -> Option.bind (ma toks) (fun (a, toks) -> f a toks)
 
-    (** From Alternative / MonadPlus *)
+    (** Alternative / MonadPlus *)
     let ( <|> ) (ma : 'a t) (ma' : 'a t) : 'a t =
      fun toks -> match ma toks with Some a -> Some a | None -> ma' toks
 
@@ -78,7 +70,7 @@ module Comb : S = struct
       List.fold_left ( <|> ) fail parsers
   end
 
-  open Combinators
+  open Ast
 
   let token (tok : token) : unit t = function
     | tok' :: toks when tok = tok' -> Some ((), toks)
@@ -177,13 +169,15 @@ module Comb : S = struct
 
   let read a =
     match parse_formula (Lex.scan [] (String.to_seq a |> List.of_seq)) with
-    | Some (x, []) -> x
-    | Some (_, _ :: _) -> failwith "Extra characters in formula"
+    | Some (x, [ EOF ]) -> x
+    | Some (_, _) -> failwith "Extra characters in formula"
     | None -> failwith "Syntax of formula"
 end
 
 (** A really bad recursive descent parser, free of monads *)
 module Manual : S = struct
+  open Ast
+
   (** Parsing a comma separated list of tokens *)
   let rec parse_list parsefn toks =
     let u, toks = parsefn toks in
@@ -255,9 +249,7 @@ module Manual : S = struct
     | _ -> failwith "Syntax of formula"
 
   let read a =
-    let x, y = parse_formula (scan [] (String.to_seq a |> List.of_seq)) in
-    (*check that no tokens remain*)
-    match y with
-    | [] -> x
-    | _ :: _ -> failwith "Extra characters in formula"
+    match parse_formula (Lex.scan [] (String.to_seq a |> List.of_seq)) with
+    | x, [ EOF ] -> x
+    | _, _ -> failwith "Extra characters in formula"
 end
