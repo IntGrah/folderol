@@ -1,88 +1,72 @@
-(*  Title:      folderol.ml
-    Author:     Lawrence C Paulson, Cambridge University Computer Laboratory
-    Updated 	  2025-03-21
-
-PROVER FOR CLASSICAL FIRST-ORDER LOGIC
-
-This should run under any up-to-date version of OCaml.
-
-Or use a text editor to cut-and-paste examples from testsuite.ml to
-*)
-
 open Ast
 
 (** Insertion into list if not already there *)
 let ins x xs = if List.mem x xs then xs else x :: xs
 
-(*UNIFICATION*)
+(* UNIFICATION *)
 
 exception Unify
 
-(*Naive unification of terms containing no bound variables*)
-let rec unify_terms env = function
-  | [], [] -> env
-  | t :: ts, u :: us ->
-      let rec chasevar = function
-        | Var a -> (
-            (*Chase variable assignments*)
-            match List.assoc_opt a env with
-            | Some u -> chasevar u
-            | None -> Var a)
-        | t -> t
-      in
-      let unify_var a t =
-        (*unification with var*)
-        let rec occurs = function
-          | Fun (_, ts) -> List.exists occurs ts
-          | Param (_, bs) -> List.exists occurs (List.map (fun x -> Var x) bs)
-          | Var b when a = b -> true
-          | Var b -> (
-              match List.assoc_opt b env with
-              | None -> false
-              | Some x -> occurs x)
-          | _ -> false
-        in
-        if t = Var a then env
-        else if occurs t then raise Unify
-        else (a, t) :: env
-      in
-      let unify_term = function
-        | Var a, t -> unify_var a t
-        | t, Var a -> unify_var a t
-        | Param (a, _), Param (b, _) when a = b -> env
-        | Fun (a, ts), Fun (b, us) when a = b -> unify_terms env (ts, us)
-        | _ -> raise Unify
-      in
-      unify_terms (unify_term (chasevar t, chasevar u)) (ts, us)
+(** Chase variable assignments *)
+let rec chasevar env = function
+  | Var a ->
+      List.assoc_opt a env |> Option.fold ~none:(Var a) ~some:(chasevar env)
+  | t -> t
+
+(** Unification with var *)
+let unify_var env a t =
+  let rec occurs = function
+    | Fun (_, ts) -> List.exists occurs ts
+    | Param (_, bs) -> List.exists occurs (List.map (fun x -> Var x) bs)
+    | Var b when a = b -> true
+    | Var b -> List.assoc_opt b env |> Option.fold ~none:false ~some:occurs
+    | _ -> false
+  in
+  if t = Var a then env else if occurs t then raise Unify else (a, t) :: env
+
+let rec unify_term env t u =
+  match (t, u) with
+  | Var a, t -> unify_var env a t
+  | t, Var a -> unify_var env a t
+  | Param (a, _), Param (b, _) when a = b -> env
+  | Fun (a, ts), Fun (b, us) when a = b && List.compare_lengths ts us = 0 ->
+      unify_terms env ts us
   | _ -> raise Unify
 
-(*Unification of atomic formulae*)
-let unify = function
-  | Pred (a, ts), Pred (b, us), env ->
-      if a = b then unify_terms env (ts, us) else raise Unify
+(** Naive unification of terms containing no bound variables *)
+and unify_terms env =
+  List.fold_left2
+    (fun env t u -> unify_term env (chasevar env t) (chasevar env u))
+    env
+
+(** Unification of atomic formulae *)
+let unify af bf =
+  match (af, bf) with
+  | Pred (a, ts), Pred (b, us) when a = b && List.compare_lengths ts us = 0 ->
+      unify_terms [] ts us
   | _ -> raise Unify
 
-(*Accumulate all Vars in the term (not Vars attached to a Param).*)
+(** Accumulate all Vars in the term (not Vars attached to a Param). *)
 let rec vars_in_term vars = function
   | Var a -> ins a vars
   | Fun (_, ts) -> List.fold_left vars_in_term vars ts
   | _ -> vars
 
-(*Instantiate a term by an environment*)
+(** Instantiate a term by an environment *)
 let rec inst_term env = function
   | Fun (a, ts) -> Fun (a, List.map (inst_term env) ts)
   | Param (a, bs) ->
       Param
         ( a,
-          List.fold_left vars_in_term []
-            (List.map (fun x -> inst_term env (Var x)) bs) )
+          List.map (fun x -> inst_term env (Var x)) bs
+          |> List.fold_left vars_in_term [] )
   | Var a -> (
       match List.assoc_opt a env with
       | Some u -> inst_term env u
       | None -> Var a)
   | t -> t
 
-(*INFERENCE: GOALS AND PROOF STATES: GOALS AND PROOF STATES*)
+(* INFERENCE: GOALS AND PROOF STATES: GOALS AND PROOF STATES *)
 
 type side = Left | Right
 type entry = int * (side * formula)
@@ -100,7 +84,7 @@ let inst_goals (gfs : goaltable) = function
   | env ->
       List.map (List.map (fun (m, (si, af)) -> (m, (si, inst_form env af)))) gfs
 
-(*Accumulate over all terms in a formula*)
+(** Accumulate over all terms in a formula *)
 let rec accum_form (f : 'a list -> term -> 'a list) (bs : 'a list) = function
   | Pred (_, ts) -> List.fold_left f bs ts
   | Neg a -> accum_form f bs a
@@ -142,8 +126,7 @@ let solve_goal gf : (formula * (string * term) list) option =
     | af :: afs ->
         let rec findB = function
           | [] -> findA afs bfs
-          | bf :: bfs -> (
-              try Some (af, unify (af, bf, [])) with Unify -> findB bfs)
+          | bf :: bfs -> ( try Some (af, unify af bf) with Unify -> findB bfs)
         in
         findB bfs
   in
@@ -163,28 +146,23 @@ let rec insert_goals (x : goaltable) (afs : formula list) (tab : goaltable) =
             (inst_goals tab env)
       | None -> insert_goals gfs afs (gf :: tab))
 
-let pp_symbol ppf = function
-  | Pred (a, _) -> Format.pp_print_string ppf a
-  | Neg _ -> Format.pp_print_string ppf "~"
-  | Binop (_, a, _) -> pp_connective ppf a
-  | Quant (q, _, _) -> pp_quantifier ppf q
-
-let pp_side ppf = function
-  | Right -> Format.pp_print_string ppf ":right"
-  | Left -> Format.pp_print_string ppf ":left"
-
 (** Generation of new variable names *)
-let gensym, init_gensym =
-  let make_letter n = String.make 1 (Char.chr (Char.code 'a' + n)) in
-  let rec make_varname n =
-    if n < 26 then make_letter n
-    else make_varname (n / 26) ^ make_letter (n mod 26)
+let (gensym, init_gensym) : (unit -> string) * (unit -> unit) =
+  let mk_var n =
+    let rec aux acc n =
+      let q, r = (n / 26, n mod 26) in
+      let char = Char.chr (Char.code 'a' + r) in
+      let acc = Seq.cons char acc in
+      if q = 0 then acc else aux acc q
+    in
+    aux Seq.empty n |> String.of_seq
   in
-  let varcount = ref (-1) in
+  let varcount = ref 0 in
   ( (fun () ->
+      let var = mk_var !varcount in
       varcount := !varcount + 1;
-      make_varname !varcount),
-    fun () -> varcount := -1 )
+      var),
+    fun () -> varcount := 0 )
 
 (** The "cost" of reducing a connective *)
 let cost = function
@@ -194,39 +172,38 @@ let cost = function
   | Right, Binop (_, Implies, _)
   | Right, Quant (All, _, _)
   | Left, Quant (Exists, _, _) ->
-      1 (*a single subgoal*)
+      1 (* a single subgoal *)
   | Right, Binop (_, And, _)
   | Left, Binop (_, Or, _)
   | Left, Binop (_, Implies, _)
   | _, Binop (_, Iff, _) ->
-      2 (*case split: 2 subgoals*)
+      2 (* case split: 2 subgoals *)
   | Left, Quant (All, _, _) | Right, Quant (Exists, _, _) ->
-      3 (*quantifier expansion*)
-  | _ -> 4 (*no reductions possible*)
+      3 (* quantifier expansion *)
+  | _, Pred _ -> 1000 (* no reductions possible *)
 
 let paircost sf : entry = (cost sf, sf)
 
-(*Insertion into a list, ordered by sort keys. *)
+(** Insertion into a list, ordered by sort keys. *)
 let rec insert less (x : entry) : goal -> goal = function
   | [] -> [ x ]
   | y :: ys ->
       if less (fst y) (fst x) then y :: insert less x ys else x :: y :: ys
 
-(*Insert an entry into a goal, in correct order *)
-(*Extend the goal G by inserting a list of (side,form) pairs*)
-let new_goal gf pairs =
-  List.fold_right (insert ( < )) (List.rev_map paircost pairs) gf
+(** Extend the goal [goal] by inserting a list of (side,form) pairs *)
+let new_goal goal pairs =
+  List.fold_right (insert ( < )) (List.rev_map paircost pairs) goal
 
 exception Reduce
 
-(*Reduce the pair using the rest of the goal (G) to make new goals*)
-let reduce_goal (entry : entry) (gf : goal) : goal list =
-  let goals = List.map (new_goal gf) in
-  let vars_in af = vars_in_goal (vars_in_formula [] af) gf in
+(** Reduce the pair using the rest of the goal [goal] to make new goals *)
+let reduce_goal (entry : entry) (goal : goal) : goal list =
+  let goals = List.map (new_goal goal) in
+  let vars_in af = vars_in_goal (vars_in_formula [] af) goal in
   let subparam af = subst_bound (Param (gensym (), vars_in af)) af in
   let subvar af = subst_bound (Var (gensym ())) af in
   let reduce : side * formula -> goaltable = function
-    | Right, Neg af -> [ new_goal gf [ (Left, af) ] ]
+    | Right, Neg af -> goals [ [ (Left, af) ] ]
     | Left, Neg af -> goals [ [ (Right, af) ] ]
     | Right, Binop (af, And, bf) -> goals [ [ (Right, af) ]; [ (Right, bf) ] ]
     | Left, Binop (af, And, bf) -> goals [ [ (Left, af); (Left, bf) ] ]
@@ -240,9 +217,13 @@ let reduce_goal (entry : entry) (gf : goal) : goal list =
         goals [ [ (Left, af); (Left, bf) ]; [ (Right, af); (Right, bf) ] ]
     | Right, Quant (All, _, af) -> goals [ [ (Right, subparam af) ] ]
     | Left, Quant (All, _, af) ->
-        [ insert ( <= ) entry gf |> insert ( < ) (paircost (Left, subvar af)) ]
+        [
+          insert ( <= ) entry goal |> insert ( < ) (paircost (Left, subvar af));
+        ]
     | Right, Quant (Exists, _, af) ->
-        [ insert ( <= ) entry gf |> insert ( < ) (paircost (Right, subvar af)) ]
+        [
+          insert ( <= ) entry goal |> insert ( < ) (paircost (Right, subvar af));
+        ]
     | Left, Quant (Exists, _, af) -> goals [ [ (Left, subparam af) ] ]
     | _ -> raise Reduce
   in
@@ -251,6 +232,16 @@ let reduce_goal (entry : entry) (gf : goal) : goal list =
 (** Print the rule used, with each formula found by unification, indenting by
     number of goals left. *)
 let print_step (_, (si, cf)) ngoals afs =
+  let pp_symbol ppf = function
+    | Pred (a, _) -> Format.pp_print_string ppf a
+    | Neg _ -> Format.pp_print_string ppf "~"
+    | Binop (_, a, _) -> pp_connective ppf a
+    | Quant (q, _, _) -> pp_quantifier ppf q
+  in
+  let pp_side ppf = function
+    | Right -> Format.pp_print_string ppf ":right"
+    | Left -> Format.pp_print_string ppf ":left"
+  in
   Format.printf "%*s%a%a%a@." ngoals "" pp_symbol cf pp_side si
     (Format.pp_print_list ~pp_sep:Format.pp_print_nothing (fun ppf ->
          Format.fprintf ppf "   %a" pp_formula))
@@ -284,41 +275,46 @@ let make_goal afs bfs : goal =
 
 (** Reading of goals: Astrs |- Bstrs *)
 let read_tab afstrs bfstrs : goaltable =
-  let afs = List.rev_map Parser.read afstrs in
-  let bfs = List.rev_map Parser.read bfstrs in
+  let read str =
+    let lexbuf = Lexing.from_string str in
+    Parser.main Lexer.token lexbuf
+  in
+  let afs = List.rev_map read afstrs in
+  let bfs = List.rev_map read bfstrs in
   let gf = make_goal afs bfs in
   let _, tab = insert_goals [ gf ] [] [] in
   tab
 
-let pp_sequent ppf = function
-  | [] -> Format.pp_print_string ppf "empty"
-  | afs ->
-      Format.pp_print_list
-        ~pp_sep:(fun ppf () -> Format.pp_print_string ppf ", ")
-        pp_formula ppf afs
-
-let pp_goal ppf gf =
-  let afs, bfs = split_goal gf in
-  Format.fprintf ppf "%a  |-  %a@.@." pp_sequent afs pp_sequent bfs
-
-let pp_param ppf (a, ts) =
-  Format.fprintf ppf "%s         %a@." a pp_args (List.map (fun x -> Var x) ts)
-
-let pp_params ppf = function
-  | [] -> ()
-  | pairs ->
-      Format.fprintf ppf "Param     Not allowed in@.%a@."
-        (Format.pp_print_list ~pp_sep:Format.pp_print_nothing pp_param)
-        pairs
-
-let pp_count ppf = function
-  | 1 -> Format.pp_print_nothing ppf ()
-  | n -> Format.fprintf ppf "%d goals@." n
-
 let pp_tab ppf = function
   | [] -> Format.fprintf ppf "No more goals: proof finished@."
   | gfs ->
-      Format.fprintf ppf "@.%a%a%a"
-        (Format.pp_print_list ~pp_sep:Format.pp_print_nothing pp_goal)
-        gfs pp_count (List.length gfs) pp_params
+      let pp_sequent ppf = function
+        | [] -> Format.pp_print_string ppf "empty"
+        | afs ->
+            Format.pp_print_list
+              ~pp_sep:(fun ppf () -> Format.pp_print_string ppf ", ")
+              pp_formula ppf afs
+      in
+      let pp_goal ppf gf =
+        let afs, bfs = split_goal gf in
+        Format.fprintf ppf "%a  |-  %a@." pp_sequent afs pp_sequent bfs
+      in
+      let pp_count ppf = function
+        | [ _ ] -> ()
+        | gfs -> Format.fprintf ppf "%d goals@." (List.length gfs)
+      in
+      let pp_param ppf (a, ts) =
+        Format.fprintf ppf "%s         %a" a pp_args
+          (List.map (fun x -> Var x) ts)
+      in
+      let pp_params ppf = function
+        | [] -> ()
+        | pairs ->
+            Format.fprintf ppf "Param     Not allowed in@.%a@.@."
+              (Format.pp_print_list ~pp_sep:Format.pp_print_newline pp_param)
+              pairs
+      in
+      Format.fprintf ppf "@.%a@.%a%a"
+        (Format.pp_print_list ~pp_sep:Format.pp_print_newline pp_goal)
+        gfs pp_count gfs pp_params
         (List.fold_left params_in_goal [] gfs)

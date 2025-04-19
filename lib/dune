@@ -1,2 +1,6 @@
 (library
  (name folderol))
+
+(ocamllex lexer)
+
+(ocamlyacc parser)
