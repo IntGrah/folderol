@@ -29,8 +29,7 @@ let rec scan front_toks = function
   (* End of char list *)
   | [] -> List.rev front_toks
   | '-' :: '-' :: '>' :: cs -> scan (IMPLIES :: front_toks) cs
-  | '<' :: '-' :: '>' :: cs ->
-      scan (IFF :: front_toks) cs (*blanks, tabs, newlines*)
+  | '<' :: '-' :: '>' :: cs -> scan (IFF :: front_toks) cs
   | 'E' :: 'X' :: 'I' :: 'S' :: 'T' :: 'S' :: cs ->
       scan (EXISTS :: front_toks) cs
   | 'A' :: 'L' :: 'L' :: cs -> scan (ALL :: front_toks) cs
