@@ -121,8 +121,7 @@ let rec params_in_term pairs = function
 (*Useful bindings, but beware free type variables*)
 let vars_in_formula = accum_form vars_in_term
 let vars_in_goal = accum_goal vars_in_formula
-let params_in_form = accum_form params_in_term
-let params_in_goal = accum_goal params_in_form
+let params_in_goal = accum_goal (accum_form params_in_term)
 
 (*Returns (As,Bs),preserving order of elements
   As = Left entries,  Bs = Right entries *)
@@ -133,17 +132,18 @@ let split_goal : goal -> formula list * formula list =
 
 let is_pred = function Pred _ -> true | _ -> false
 
-(*Solve the goal (A |- A') by unifying A with A', Left and Right atomic formulae.
-  Returns list [ (A,env) ] if successful, otherwise []. *)
-let solve_goal gf =
+(** Solve the goal [A |- A'] by unifying [A] with [A'], [Left] and [Right]
+    atomic formulae. Returns list [Some (A, env)] if successful, otherwise
+    [None]. *)
+let solve_goal gf : (formula * (string * term) list) option =
   let rec findA afs bfs =
     match afs with
-    | [] -> [] (*failure*)
+    | [] -> None (*failure*)
     | af :: afs ->
         let rec findB = function
           | [] -> findA afs bfs
           | bf :: bfs -> (
-              try [ (af, unify (af, bf, [])) ] with Unify -> findB bfs)
+              try Some (af, unify (af, bf, [])) with Unify -> findB bfs)
         in
         findB bfs
   in
@@ -157,11 +157,11 @@ let rec insert_goals (x : goaltable) (afs : formula list) (tab : goaltable) =
   | [] -> (afs, tab)
   | gf :: gfs -> (
       match solve_goal gf with
-      | (af, env) :: _ ->
+      | Some (af, env) ->
           (* instantiate other goals *)
           insert_goals (inst_goals gfs env) (inst_form env af :: afs)
             (inst_goals tab env)
-      | [] -> insert_goals gfs afs (gf :: tab))
+      | None -> insert_goals gfs afs (gf :: tab))
 
 let pp_symbol ppf = function
   | Pred (a, _) -> Format.pp_print_string ppf a
